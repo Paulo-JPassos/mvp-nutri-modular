@@ -1,5 +1,8 @@
 # =========================
 # NutriApp - MVP Modular (Streamlit)
+# - NÃO QUEBRA sem reportlab
+# - PDF habilita automaticamente quando reportlab existir
+# - Módulos por clique + subtype em lista suspensa
 # =========================
 
 import os
@@ -11,9 +14,14 @@ from typing import Optional, Dict, Tuple
 import pandas as pd
 import streamlit as st
 
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import cm
+# ===== PDF: import condicional (não quebra o app) =====
+REPORTLAB_AVAILABLE = True
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import cm
+except Exception:
+    REPORTLAB_AVAILABLE = False
 
 
 # =========================
@@ -93,11 +101,7 @@ def deduplicate_storage() -> Dict[str, Tuple[int, int]]:
     if before > 0 and "created_at" in r.columns:
         r = r.sort_values("created_at", ascending=True)
         r = r.drop_duplicates(
-            subset=[
-                "patient_id", "module", "subtype",
-                "summary", "assessment", "attention_points",
-                "next_steps", "missing_data", "follow_up"
-            ],
+            subset=["patient_id", "module", "subtype", "summary", "assessment", "attention_points", "next_steps", "missing_data", "follow_up"],
             keep="first"
         )
         save_df(r, REPORTS_FILE)
@@ -127,128 +131,113 @@ def generate_report_simulated(module: str, subtype: str, complaint: str, goals: 
         f"Observações: {notes if notes else 'Não informado'}"
     )
 
-    assessment_lines = []
-    attention = []
-    next_steps = []
-    missing = []
-    follow_up = []
+    assessment_lines, attention, next_steps, missing, follow_up = [], [], [], [], []
 
-    # Heurísticas comuns
     if _contains_any(complaint, ["cansaço", "fadiga", "sonol", "insônia"]):
         assessment_lines.append("A queixa sugere possível relação com sono, hidratação e regularidade alimentar.")
         attention.append("Investigar padrão de sono, ingestão hídrica e regularidade das refeições.")
-        next_steps.append("Registrar sono e hidratação por 7 dias e revisar distribuição das refeições ao longo do dia.")
+        next_steps.append("Registrar sono e hidratação por 7 dias e revisar distribuição das refeições.")
 
     if _contains_any(goals, ["emagrec", "perder peso", "redução de peso"]):
         assessment_lines.append("O objetivo indica necessidade de estratégia gradual para favorecer adesão.")
         attention.append("Risco de metas agressivas reduzirem adesão e favorecerem compensações alimentares.")
-        next_steps.append("Definir metas graduais e indicadores de adesão (frequência alimentar, proteína/dia e rotina).")
+        next_steps.append("Definir metas graduais e indicadores de adesão (frequência alimentar e proteína/dia).")
 
-    if _contains_any(complaint + " " + notes, ["intest", "gases", "incha", "azia", "reflux"]):
-        assessment_lines.append("Há indícios de desconforto gastrointestinal que pode demandar investigação dirigida.")
-        attention.append("Avaliar gatilhos alimentares, horários e composição das refeições.")
-        next_steps.append("Aplicar diário alimentar dirigido por 3 a 7 dias e registrar sintomas por horário.")
-
-    # MÓDULO: Nutrição Clínica
     if module == "Nutrição clínica":
         comorb = (extra.get("comorbidities") or "").strip()
         labs = (extra.get("labs") or "").strip()
         meds = (extra.get("meds") or "").strip()
 
-        assessment_lines.append("No contexto clínico, recomenda-se integrar histórico, sintomas e dados laboratoriais para orientar conduta inicial.")
+        assessment_lines.append("No contexto clínico, recomenda-se integrar histórico, sintomas e exames para orientar conduta inicial.")
 
         if comorb:
-            attention.append(f"Comorbidades registradas: {comorb}. Ajustar conduta conforme condição clínica.")
+            attention.append(f"Comorbidades: {comorb}. Ajustar conduta conforme condição clínica.")
         else:
-            missing.append("Comorbidades e diagnósticos relevantes não informados.")
+            missing.append("Comorbidades/diagnósticos não informados.")
 
         if labs:
-            attention.append(f"Exames citados: {labs}. Verificar alterações relevantes e tendência temporal.")
+            attention.append(f"Exames: {labs}. Verificar alterações e tendência.")
             next_steps.append("Padronizar registro de exames com datas e acompanhar tendência longitudinal.")
         else:
             missing.append("Exames laboratoriais recentes não informados, quando aplicável.")
 
         if meds:
-            attention.append(f"Medicamentos e suplementos: {meds}. Verificar interações e impactos (apetite, glicemia, sono).")
+            attention.append(f"Medicamentos/suplementos: {meds}. Verificar interações e impactos.")
         else:
-            missing.append("Medicamentos e suplementos em uso não informados.")
+            missing.append("Medicamentos e suplementos não informados.")
 
-        next_steps.append("Definir plano inicial com metas objetivas e rotina de acompanhamento.")
-        follow_up.append("Reavaliar adesão, sintomas e evolução em 7 a 14 dias.")
-        follow_up.append("Atualizar medidas e revisar exames conforme disponibilidade.")
+        next_steps.append("Definir plano inicial com metas objetivas e acompanhamento.")
+        follow_up.append("Reavaliar em 7 a 14 dias e ajustar conduta conforme resposta e adesão.")
 
-    # MÓDULO: Nutrição Esportiva
     elif module == "Nutrição esportiva":
         training = (extra.get("training_routine") or "").strip()
         goal_perf = (extra.get("performance_goal") or "").strip()
         comp = (extra.get("body_comp") or "").strip()
 
-        assessment_lines.append("No contexto esportivo, é necessário alinhar ingestão, timing e recuperação à rotina de treino e objetivo de performance.")
+        assessment_lines.append("No contexto esportivo, alinhar ingestão, timing e recuperação à rotina de treino e objetivo.")
 
         if training:
-            attention.append(f"Rotina de treino: {training}. Ajustar timing de nutrientes, hidratação e recuperação.")
-            next_steps.append("Mapear janela pré e pós-treino e registrar recuperação percebida e sono.")
+            attention.append(f"Treino: {training}. Ajustar timing, hidratação e recuperação.")
+            next_steps.append("Mapear janela pré e pós-treino e registrar sono e recuperação.")
         else:
-            missing.append("Rotina de treino (frequência, duração e intensidade) não informada.")
+            missing.append("Rotina de treino não informada.")
 
         if goal_perf:
-            attention.append(f"Meta esportiva: {goal_perf}. Alinhar estratégia alimentar à periodização.")
+            attention.append(f"Meta: {goal_perf}. Alinhar estratégia à periodização.")
         else:
-            missing.append("Meta esportiva específica não informada (performance, hipertrofia, resistência, recomposição).")
+            missing.append("Meta esportiva específica não informada.")
 
         if comp:
-            attention.append(f"Composição corporal: {comp}. Usar como referência para metas realistas e monitoramento.")
+            attention.append(f"Composição corporal: {comp}. Usar para metas realistas e monitoramento.")
         else:
             missing.append("Composição corporal não informada, quando aplicável.")
 
-        next_steps.append("Definir indicadores semanais: treinos realizados, sono, fome, recuperação e desempenho.")
-        follow_up.append("Reavaliar resposta ao plano e performance em 7 dias, com ajustes finos no timing e distribuição.")
-        follow_up.append("Atualizar métricas conforme periodicidade e disponibilidade.")
+        next_steps.append("Definir indicadores semanais: treinos, sono, fome, recuperação e desempenho.")
+        follow_up.append("Reavaliar em 7 dias e ajustar timing e distribuição conforme resposta.")
 
-    # MÓDULO: Materno Infantil
     elif module == "Materno infantil":
         child_age = (extra.get("child_age") or "").strip()
         breastfeeding = (extra.get("breastfeeding") or "").strip()
         growth = (extra.get("growth_curve") or "").strip()
         allergy = (extra.get("allergy") or "").strip()
 
-        assessment_lines.append("No contexto materno-infantil, é essencial considerar idade, rotina alimentar, crescimento e tolerâncias, priorizando segurança.")
+        assessment_lines.append("No contexto materno-infantil, considerar idade, rotina, crescimento e tolerâncias com foco em segurança.")
 
         if child_age:
             attention.append(f"Idade da criança: {child_age}. Ajustar orientação conforme fase alimentar.")
         else:
-            missing.append("Idade da criança não informada, essencial para orientar conduta.")
+            missing.append("Idade da criança não informada.")
 
         if breastfeeding:
-            attention.append(f"Aleitamento: {breastfeeding}. Considerar manejo e orientação conforme rotina familiar.")
+            attention.append(f"Aleitamento: {breastfeeding}. Considerar manejo conforme rotina familiar.")
         else:
-            missing.append("Informação sobre aleitamento não informada, quando aplicável.")
+            missing.append("Aleitamento não informado, quando aplicável.")
 
         if growth:
-            attention.append(f"Crescimento/curva: {growth}. Verificar tendência e sinais de risco nutricional.")
-            next_steps.append("Registrar medidas com datas e acompanhar tendência longitudinal na curva.")
+            attention.append(f"Crescimento/curva: {growth}. Verificar tendência.")
+            next_steps.append("Registrar medidas com datas e acompanhar tendência longitudinal.")
         else:
             missing.append("Peso/estatura e datas não informados.")
 
         if allergy:
-            attention.append(f"Alergias/intolerâncias: {allergy}. Garantir adequação e segurança alimentar.")
+            attention.append(f"Alergias/intolerâncias: {allergy}. Garantir segurança alimentar.")
         else:
             missing.append("Alergias/intolerâncias não informadas, quando aplicável.")
 
-        next_steps.append("Orientar plano inicial considerando rotina familiar, aceitação alimentar e segurança na variedade.")
+        next_steps.append("Orientar plano inicial considerando rotina familiar e segurança na variedade alimentar.")
         follow_up.append("Reavaliar aceitação e evolução em 14 a 30 dias, conforme caso.")
 
     if not assessment_lines:
-        assessment_lines.append("Registro insuficiente para avaliação mais direcionada. Recomenda-se completar dados e reavaliar.")
+        assessment_lines.append("Registro insuficiente para avaliação mais direcionada. Recomenda-se completar dados.")
 
     if not attention:
-        attention = ["Não foram identificados pontos críticos com base nos dados informados. Recomenda-se completar o registro."]
+        attention = ["Não foram identificados pontos críticos com os dados informados. Recomenda-se completar o registro."]
 
     if not next_steps:
         next_steps = ["Completar anamnese e estabelecer plano inicial com monitoramento em 7 a 14 dias."]
 
     if not missing:
-        missing = ["Sem pendências críticas identificadas a partir do registro atual."]
+        missing = ["Sem pendências críticas identificadas no registro atual."]
 
     if not follow_up:
         follow_up = ["Agendar retorno para reavaliação e ajuste do plano conforme evolução e adesão."]
@@ -264,15 +253,14 @@ def generate_report_simulated(module: str, subtype: str, complaint: str, goals: 
 
 
 # =========================
-# 4) PDF (REPORTLAB)
+# 4) PDF (se reportlab existir)
 # =========================
 
 def _wrap_text(text: str, max_chars: int = 105) -> list:
     if not text:
         return [""]
     words = text.replace("\r", "").split()
-    lines, line = [], []
-    count = 0
+    lines, line, count = [], [], 0
     for w in words:
         add = len(w) + (1 if count > 0 else 0)
         if count + add <= max_chars:
@@ -296,6 +284,9 @@ def generate_report_pdf_bytes(
     report: dict,
     patient_name: Optional[str] = None,
 ) -> bytes:
+    if not REPORTLAB_AVAILABLE:
+        raise RuntimeError("reportlab não está instalado no ambiente.")
+
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
@@ -342,8 +333,8 @@ def generate_report_pdf_bytes(
     section("Avaliação inicial", report.get("assessment", ""))
     section("Pontos de atenção", report.get("attention_points", ""))
     section("Próximos passos sugeridos", report.get("next_steps", ""))
-    section("Dados que faltam para refinar a análise", report.get("missing_data", ""))
-    section("Sugestão de acompanhamento", report.get("follow_up", ""))
+    section("Dados faltantes", report.get("missing_data", ""))
+    section("Acompanhamento", report.get("follow_up", ""))
 
     c.setFont("Helvetica-Oblique", 8)
     disclaimer = "Observação: este relatório é gerado como apoio e não substitui o julgamento profissional."
@@ -365,7 +356,7 @@ def generate_report_pdf_bytes(
 # =========================
 
 def sidebar_controls():
-    st.sidebar.header("Módulos (clique para acessar)")
+    st.sidebar.header("Módulos (clique)")
     c1, c2, c3 = st.sidebar.columns(3)
 
     if c1.button("Clínica"):
@@ -391,9 +382,12 @@ def sidebar_controls():
         st.sidebar.write(f"Relatórios: {result['reports'][0]} → {result['reports'][1]}")
 
     st.sidebar.divider()
-    st.sidebar.header("Exportação")
+    st.sidebar.header("PDF e exportação")
 
-    # PDF persistido na sessão
+    if not REPORTLAB_AVAILABLE:
+        st.sidebar.error("PDF desativado: reportlab não está instalado.")
+        st.sidebar.code("pip install reportlab\npip freeze | findstr reportlab", language="bash")
+
     if st.session_state.get("last_pdf_bytes"):
         st.sidebar.download_button(
             label="Baixar último PDF",
@@ -401,10 +395,7 @@ def sidebar_controls():
             file_name=st.session_state.get("last_pdf_filename", "relatorio.pdf"),
             mime="application/pdf",
         )
-    else:
-        st.sidebar.caption("Gere um relatório para liberar o PDF.")
 
-    # Exportar relatórios CSV (importante na nuvem)
     reports_df = load_df(REPORTS_FILE)
     if len(reports_df) > 0:
         st.sidebar.download_button(
@@ -413,8 +404,6 @@ def sidebar_controls():
             file_name="reports_export.csv",
             mime="text/csv",
         )
-    else:
-        st.sidebar.caption("Ainda não há relatórios para exportar.")
 
 
 def patient_block() -> pd.DataFrame:
@@ -466,7 +455,6 @@ def consult_and_analysis_block(patients: pd.DataFrame):
     st.write(f"Módulo ativo: **{st.session_state.module}**")
     st.write(f"Paciente selecionado: **{st.session_state.patient_id}**")
 
-    # Lista suspensa apenas para Clínica e Esportiva (conforme pedido)
     subtype = "Padrão"
     if st.session_state.module == "Nutrição clínica":
         subtype = st.selectbox("Tipo de consulta (Clínica)", ["Padrão", "Emagrecimento", "Diabetes/Metabólica", "Gastrointestinal"])
@@ -481,21 +469,17 @@ def consult_and_analysis_block(patients: pd.DataFrame):
         notes = st.text_area("Observações adicionais", height=120)
 
         extra = {}
-
         if st.session_state.module == "Nutrição clínica":
-            st.markdown("**Campos do módulo Nutrição clínica**")
             extra["comorbidities"] = st.text_input("Comorbidades (opcional)")
             extra["labs"] = st.text_input("Exames laboratoriais citados (opcional)")
             extra["meds"] = st.text_input("Medicamentos e suplementos (opcional)")
 
         elif st.session_state.module == "Nutrição esportiva":
-            st.markdown("**Campos do módulo Nutrição esportiva**")
             extra["training_routine"] = st.text_input("Rotina de treino (opcional)")
             extra["performance_goal"] = st.text_input("Meta esportiva (opcional)")
             extra["body_comp"] = st.text_input("Composição corporal (opcional)")
 
         elif st.session_state.module == "Materno infantil":
-            st.markdown("**Campos do módulo Materno infantil**")
             extra["child_age"] = st.text_input("Idade da criança (opcional)")
             extra["breastfeeding"] = st.text_input("Aleitamento (opcional)")
             extra["growth_curve"] = st.text_input("Crescimento/curva (opcional)")
@@ -508,12 +492,27 @@ def consult_and_analysis_block(patients: pd.DataFrame):
     reports = load_df(REPORTS_FILE)
 
     def get_patient_name() -> Optional[str]:
-        if len(patients) > 0 and "patient_id" in patients.columns:
-            prow = patients[patients["patient_id"] == st.session_state.patient_id]
-            if len(prow) > 0:
-                name = str(prow.iloc[0].get("name", "")).strip()
-                return name if name else None
+        prow = patients[patients["patient_id"] == st.session_state.patient_id] if len(patients) > 0 else pd.DataFrame()
+        if len(prow) > 0:
+            name = str(prow.iloc[0].get("name", "")).strip()
+            return name if name else None
         return None
+
+    def persist_consult(cid: str, now: str):
+        row = {
+            "consult_id": cid,
+            "patient_id": st.session_state.patient_id,
+            "module": st.session_state.module,
+            "subtype": subtype,
+            "complaint": complaint.strip(),
+            "goals": goals.strip(),
+            "notes": notes.strip(),
+            "extra_json": str(extra),
+            "created_at": now,
+        }
+        nonlocal consults
+        consults = pd.concat([consults, pd.DataFrame([row])], ignore_index=True)
+        save_df(consults, CONSULTS_FILE)
 
     if save_consult_btn:
         if not complaint.strip() or not goals.strip():
@@ -521,20 +520,7 @@ def consult_and_analysis_block(patients: pd.DataFrame):
         else:
             cid = str(uuid.uuid4())[:8]
             now = datetime.now().isoformat(timespec="seconds")
-            row = {
-                "consult_id": cid,
-                "patient_id": st.session_state.patient_id,
-                "module": st.session_state.module,
-                "subtype": subtype,
-                "complaint": complaint.strip(),
-                "goals": goals.strip(),
-                "notes": notes.strip(),
-                "extra_json": str(extra),
-                "created_at": now,
-            }
-            consults = pd.concat([consults, pd.DataFrame([row])], ignore_index=True)
-            save_df(consults, CONSULTS_FILE)
-            st.session_state.last_consult_id = cid
+            persist_consult(cid, now)
             st.success(f"Consulta salva (ID {cid}).")
 
     if analyze_btn:
@@ -544,21 +530,7 @@ def consult_and_analysis_block(patients: pd.DataFrame):
             cid = str(uuid.uuid4())[:8]
             now = datetime.now().isoformat(timespec="seconds")
 
-            # salva consulta junto com análise
-            row = {
-                "consult_id": cid,
-                "patient_id": st.session_state.patient_id,
-                "module": st.session_state.module,
-                "subtype": subtype,
-                "complaint": complaint.strip(),
-                "goals": goals.strip(),
-                "notes": notes.strip(),
-                "extra_json": str(extra),
-                "created_at": now,
-            }
-            consults = pd.concat([consults, pd.DataFrame([row])], ignore_index=True)
-            save_df(consults, CONSULTS_FILE)
-            st.session_state.last_consult_id = cid
+            persist_consult(cid, now)
 
             report = generate_report_simulated(st.session_state.module, subtype, complaint, goals, notes, extra)
 
@@ -580,7 +552,7 @@ def consult_and_analysis_block(patients: pd.DataFrame):
             reports = pd.concat([reports, pd.DataFrame([report_row])], ignore_index=True)
             save_df(reports, REPORTS_FILE)
 
-            st.success("Relatório gerado com sucesso. Resultado observável abaixo:")
+            st.success("Relatório gerado com sucesso.")
 
             st.markdown("### 3) Relatório estruturado")
             st.markdown("**Síntese**")
@@ -596,76 +568,69 @@ def consult_and_analysis_block(patients: pd.DataFrame):
             st.markdown("**Acompanhamento**")
             st.markdown(report["follow_up"])
 
-            # PDF: gerar e manter em sessão
-            patient_name = get_patient_name()
+            if REPORTLAB_AVAILABLE:
+                patient_name = get_patient_name()
+                try:
+                    pdf_bytes = generate_report_pdf_bytes(
+                        module=st.session_state.module,
+                        subtype=subtype,
+                        patient_id=st.session_state.patient_id,
+                        consult_id=cid,
+                        created_at=now,
+                        report=report,
+                        patient_name=patient_name,
+                    )
+                    st.session_state["last_pdf_bytes"] = pdf_bytes
+                    st.session_state["last_pdf_filename"] = f"relatorio_{st.session_state.patient_id}_{cid}.pdf"
 
-            try:
-                pdf_bytes = generate_report_pdf_bytes(
-                    module=st.session_state.module,
-                    subtype=subtype,
-                    patient_id=st.session_state.patient_id,
-                    consult_id=cid,
-                    created_at=now,
-                    report=report,
-                    patient_name=patient_name,
-                )
-            except Exception as e:
-                st.error("Falha ao gerar PDF. Verifique se 'reportlab' está instalado e se o deploy foi atualizado.")
-                st.exception(e)
-                pdf_bytes = None
-
-            if pdf_bytes:
-                st.session_state["last_pdf_bytes"] = pdf_bytes
-                st.session_state["last_pdf_filename"] = f"relatorio_{st.session_state.patient_id}_{cid}.pdf"
-
-                # Download imediato na tela (mais confiável)
-                st.download_button(
-                    label="Baixar relatório (PDF)",
-                    data=st.session_state["last_pdf_bytes"],
-                    file_name=st.session_state["last_pdf_filename"],
-                    mime="application/pdf",
-                    key=f"pdf_download_{cid}",
-                )
-
-                st.info("PDF gerado e disponível também na barra lateral.")
+                    st.download_button(
+                        label="Baixar relatório (PDF)",
+                        data=pdf_bytes,
+                        file_name=st.session_state["last_pdf_filename"],
+                        mime="application/pdf",
+                        key=f"pdf_{cid}",
+                    )
+                except Exception as e:
+                    st.error("Erro ao gerar PDF.")
+                    st.exception(e)
+            else:
+                st.warning("PDF indisponível no ambiente atual. Instale reportlab para habilitar.")
 
     st.divider()
-    st.subheader("Histórico mínimo (sessão atual)")
+    st.subheader("Histórico mínimo")
     consults = load_df(CONSULTS_FILE)
     if len(consults) > 0 and "patient_id" in consults.columns:
         p_consults = consults[consults["patient_id"] == st.session_state.patient_id].copy()
-        if len(p_consults) == 0:
-            st.info("Nenhuma consulta registrada para este paciente.")
-        else:
+        if len(p_consults) > 0:
             p_consults = p_consults.sort_values("created_at", ascending=False)
             st.dataframe(
                 p_consults[["created_at", "consult_id", "module", "subtype", "complaint", "goals"]],
-                use_container_width=True,
+                use_container_width=True
             )
-    else:
-        st.info("Ainda não há consultas registradas.")
+        else:
+            st.info("Nenhuma consulta registrada para este paciente.")
 
 
 def main():
     st.set_page_config(page_title="NutriApp", layout="wide")
     ensure_storage()
 
-    if "module" not in st.session_state:
-        st.session_state.module = None
-    if "patient_id" not in st.session_state:
-        st.session_state.patient_id = None
-    if "last_consult_id" not in st.session_state:
-        st.session_state.last_consult_id = None
-    if "last_pdf_bytes" not in st.session_state:
-        st.session_state.last_pdf_bytes = None
-    if "last_pdf_filename" not in st.session_state:
-        st.session_state.last_pdf_filename = None
+    st.session_state.setdefault("module", None)
+    st.session_state.setdefault("patient_id", None)
+    st.session_state.setdefault("last_pdf_bytes", None)
+    st.session_state.setdefault("last_pdf_filename", None)
 
     st.title("NutriApp")
     st.caption(
-        "MVP demonstrável com módulos por especialidade e geração de relatório estruturado com apoio de IA simulada. "
-        "Fluxo: módulo → paciente → consulta → analisar → relatório + PDF."
+        "MVP demonstrável com módulos por especialidade e relatório estruturado gerado por IA simulada. "
+        "Fluxo: módulo → paciente → consulta → analisar → relatório."
     )
+
+    if not REPORTLAB_AVAILABLE:
+        st.warning(
+            "PDF desativado neste ambiente porque o pacote reportlab não está instalado. "
+            "O app continua funcionando normalmente; o PDF será habilitado assim que o reportlab estiver disponível."
+        )
 
     sidebar_controls()
 
