@@ -357,13 +357,15 @@ def generate_report_pdf_bytes(
 
 def sidebar_controls():
     st.sidebar.header("Módulos (clique)")
-    c1, c2, c3 = st.sidebar.columns(3)
 
-    if c1.button("Clínica"):
+    # Botões em coluna (vertical), ocupando a largura
+    if st.sidebar.button("Nutrição clínica", use_container_width=True):
         st.session_state.module = "Nutrição clínica"
-    if c2.button("Esportiva"):
+
+    if st.sidebar.button("Nutrição esportiva", use_container_width=True):
         st.session_state.module = "Nutrição esportiva"
-    if c3.button("Materno"):
+
+    if st.sidebar.button("Materno infantil", use_container_width=True):
         st.session_state.module = "Materno infantil"
 
     if st.session_state.module:
@@ -374,7 +376,7 @@ def sidebar_controls():
     st.sidebar.divider()
     st.sidebar.header("Manutenção")
 
-    if st.sidebar.button("Remover duplicatas"):
+    if st.sidebar.button("Remover duplicatas", use_container_width=True):
         result = deduplicate_storage()
         st.sidebar.success("Deduplicação concluída.")
         st.sidebar.write(f"Pacientes: {result['patients'][0]} → {result['patients'][1]}")
@@ -386,7 +388,7 @@ def sidebar_controls():
 
     if not REPORTLAB_AVAILABLE:
         st.sidebar.error("PDF desativado: reportlab não está instalado.")
-        st.sidebar.code("pip install reportlab\npip freeze | findstr reportlab", language="bash")
+        st.sidebar.code("pip install reportlab", language="bash")
 
     if st.session_state.get("last_pdf_bytes"):
         st.sidebar.download_button(
@@ -394,6 +396,7 @@ def sidebar_controls():
             data=st.session_state["last_pdf_bytes"],
             file_name=st.session_state.get("last_pdf_filename", "relatorio.pdf"),
             mime="application/pdf",
+            use_container_width=True,
         )
 
     reports_df = load_df(REPORTS_FILE)
@@ -403,6 +406,7 @@ def sidebar_controls():
             data=reports_df.to_csv(index=False).encode("utf-8"),
             file_name="reports_export.csv",
             mime="text/csv",
+            use_container_width=True,
         )
 
 
@@ -643,3 +647,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
